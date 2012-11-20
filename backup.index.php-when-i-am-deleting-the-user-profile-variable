@@ -1,0 +1,87 @@
+<?php
+    require 'facebook-php-sdk/src/facebook.php';
+
+    //Entering the credentials
+    $facebook = new Facebook(array(
+      'appId'  => '519964618015269',
+      'secret' => '4e86167ecdb58878dfe2a78222cb460d',
+    ));
+
+    // Get User ID
+    $user = $facebook->getUser();
+
+  if ($user) {
+    try {
+      // Proceed knowing you have a logged in user who's authenticated.
+      $user_profile = $facebook->api('/me');
+    } catch (FacebookApiException $e) {
+      error_log($e);
+      $user = null;
+    }
+  }
+
+  if ($user) {
+    try {
+      // Proceed knowing you have a logged in user who's authenticated.
+      //$user_friends = $facebook->api('/me?fields=id,name,friends.fields(id,name,birthday)');
+      $user_friends = $facebook->api('/me?fields=id,name,birthday,education,gender,hometown,interests,location,friends.fields(id,name,birthday,education,gender,hometown,interests,location)');
+    } catch (FacebookApiException $e) {
+      error_log($e);
+      $user = null;
+    }
+  }
+
+  // Login or logout url will be needed depending on current user state.
+  if ($user) {
+    $logoutUrl = $facebook->getLogoutUrl();
+  } else {
+    $params = array(
+      'scope' => 'user_birthday,friends_birthday,user_education_history,friends_education_history,user_hometown,friends_hometown,user_interests,friends_interests,user_location,friends_location'
+      //'scope' => 'user_about_me,friends_about_me,user_birthday,friends_birthday,user_groups,friends_groups,user_hometown,friends_hometown,user_location,friends_location'
+      );
+    $loginUrl = $facebook->getLoginUrl($params);
+  }
+
+?>
+<!doctype html>
+<html xmlns:fb="http://www.facebook.com/2008/fbml">
+  <head>
+    <title>Friends cluster | facebook</title>
+    <style>
+      body {
+        font-family: 'Lucida Grande', Verdana, Arial, sans-serif;
+      }
+      h1 a {
+        text-decoration: none;
+        color: #3b5998;
+      }
+      h1 a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Facebook friends clustering</h1>
+
+    <?php if ($user): ?>
+      <a href="<?php echo $logoutUrl; ?>">Logout</a>
+    <?php else: ?>
+      <div>
+        <a href="<?php echo $loginUrl; ?>">Login with Facebook</a>
+        <br />
+        Please login to retrieve the data of your friends
+      </div>
+    <?php endif ?>
+
+    <?php if ($user): ?>
+      <h3>Your User Object (/me)</h3>
+      <pre><?php print_r($user_profile); ?></pre>
+    <?php endif ?>
+
+
+    <?php if ($user): ?>
+      <h3>Your User Object (/me)</h3>
+      <pre><?php print_r($user_friends); ?></pre>
+    <?php endif ?>
+  </body>
+</html>

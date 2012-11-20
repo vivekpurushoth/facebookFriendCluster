@@ -1,0 +1,357 @@
+<?php
+    require 'facebook-php-sdk/src/facebook.php';
+
+    //App credentials
+    $facebook = new Facebook(array(
+      'appId'  => '519964618015269',
+      'secret' => '4e86167ecdb58878dfe2a78222cb460d',
+    ));
+
+    //Get User ID
+    $user = $facebook->getUser();
+
+
+    if ($user) {//If user is logged in then get his information along with the information of his friends
+      try {
+        //Trying to retrieve user information and his friends information via graph api and storing it in $user_friends
+        $user = $facebook->api('/me?fields=id,name,birthday,education,gender,hometown,interests,location');
+        $user_friends = $facebook->api('/me?fields=id,name,birthday,education,gender,hometown,interests,location,friends.fields(id,name,birthday,education,gender,hometown,interests,location)');
+        $similar_users = getSimilarUsers($user,$user_friends);
+        $clusters = create_gen_cluster($user_friends);
+      } catch (FacebookApiException $e) {
+        error_log($e);
+        $user = null;
+      }
+    }
+
+
+    //This function takes the data obtained from the facebook api and returns the 10 most similar users to the user logged in
+    function getSimilarUsers($user,$user_friends) {
+      foreach ($user_friends[friends][data] as &$value) {
+        $value["similarity"] = getSimilarity($user,$value);
+      }
+      $similar_users = array();
+      for($i=0; $i<10 ; $i++) {
+        for($j=0; $j<count($user_friends[friends][data]); $j++) {
+          if(isset($user_friends[friends][data][$j][similarity]) && isset($user_friends[friends][data][$j+1][similarity])){
+            if($user_friends[friends][data][$j][similarity] > $user_friends[friends][data][$j+1][similarity]) {
+              $temp = $user_friends[friends][data][$j];
+              $user_friends[friends][data][$j] = $user_friends[friends][data][$j+1];
+              $user_friends[friends][data][$j+1] = $temp;
+            }
+          }
+        }
+      }
+      for($i=0; $i<10; $i++) {
+        $similar_users[$i] = $user_friends[friends][data][count($user_friends[friends][data])-$i-1];
+      }
+      return $similar_users;
+    }
+
+    function getSimilarity($user,$friend) {
+      $birthdaySimilarity = getBirthdaySimilarity($user,$friend);
+      $hometownSimilarity = getHomeTownSimilarity($user,$friend);
+      $locationSimilarity = getLocationSimilarity($user,$friend);
+      $educationSimilarity = getEducationSimilarity($user,$friend);
+      $interestsSimilarity = getInterestsSimilarity($user,$friend);
+      $similarity = $birthdaySimilarity + $hometownSimilarity + $locationSimilarity + $educationSimilarity + $interestsSimilarity;
+      $similarity = $similarity/5;
+      return $similarity;
+    }
+
+    function getBirthdaySimilarity($user,$friend) {
+      if(isset($user[birthday]) && isset($friend[birthday])){
+        $bir1 = explode("/",$user[birthday]);
+        $bir2 = explode("/",$friend[birthday]);
+        if(isset($bir1[0]) && isset($bir2[0])) {
+          if($bir1[0] == $bir2[0]){
+            return 1;
+          }
+        }
+      }
+      return 0;
+    }
+
+    function getHomeTownSimilarity($user,$friend) {
+      if(isset($user[hometown]) && isset($friend[hometown])) {
+        if($user[hometown] == $friend[hometown]) {
+          return 1;
+        }
+      }
+      return 0;
+    }
+
+    function getLocationSimilarity($user,$friend) {
+      if(isset($user[location]) && isset($friend[location])) {
+        if($user[location] == $friend[location]) {
+          return 1;
+        }
+      }
+      return 0;
+    }
+
+    function getEducationSimilarity($user,$friend) {
+      $total = 0.0;
+      $sum = 1;
+      if(isset($user[education]) && isset($friend[education])) {
+        $sum = count($user[education]) + count($friend[education]);
+        for($i = 0; $i < count($user[education]); $i++) {
+          for($j = 0; $j < count($friend[education]); $j++) {
+            if(strcasecmp($user[education][$i][school][name],$friend[education][$j][school][name]) == 0) { 
+              $total = $total + 1;
+            }
+          }
+        }
+      }
+      return $total/$sum;
+    }
+
+    function getInterestsSimilarity($user,$friend) {
+      $total = 0.0;
+      $sum = 1;
+      if(isset($user[interests]) && isset($friend[interests])) {
+        $sum = count($user[interests]) + count($friend[interests]);
+        for($i = 0; $i < count($user[interests]); $i++) {
+          for($j = 0; $j < count($friend[interests]); $j++) {
+            if(strcasecmp($user[interests][data][$i][name],$friend[interests][data][$j][name]) == 0) { 
+              $total = $total + 1;
+            }
+            else if(strpos(strtolower($user[interests][data][$i][name]), strtolower($friend[interests][data][$j][name])) !== false || strpos(strtolower($friend[interests][data][$j][name]),strtolower($user[interests][data][$i][name])) !== false) {
+              $total = $total + 1;
+            }
+            else {
+              similar_text(strtolower($user[interests][data][$i][name]), strtolower($friend[interests][data][$j][name]), $per);
+              if($per > 50) {
+                $total = $total + 1;
+              }
+            }
+          }
+        }
+      }
+      return $total/$sum;
+    }
+
+    function create_gen_cluster($user_friends) {
+      $numberOfClusters = 5;
+      $numbers = range(1, count($user_friends[friends][data])-1);
+      shuffle($numbers);
+      $initial = array_slice($numbers, 0, $numberOfClusters);
+      $clustered = array();
+      $unclustered = array();
+      $finalClusters = array();
+      for($i=0,$j=0,$k=0;$i<count($user_friends[friends][data])-1;$i++) {
+        if(in_array($i, $initial)) {
+          $clustered[$j] = $user_friends[friends][data][$i];
+          $j = $j + 1;
+        }
+        else {
+          $unclustered[$k] = $user_friends[friends][data][$i];
+          $k = $k + 1;
+        }
+      }
+      for($i=0; $i<count($clustered);$i++) {
+        $finalClusters[$i][0]= $clustered[$i];
+      }
+      for($i = 0;$i < count($unclustered); $i++) {
+        for($j = 0; $j < count($clustered); $j++) {
+          $similarityScores[$j] = getSimilarity($unclustered[$i],$clustered[$j]);
+        }
+        $max = 0;
+        $flag_max_changed = 0;
+        for($k = 1; $k < count($clustered); $k++) {
+          if($similarityScores[$max]<$similarityScores[$k]){
+            $max = $k;
+          }
+        }
+        if($max == 0){
+          for($k = 1; $k < count($clustered); $k++) {
+            if($similarityScores[$max]==$similarityScores[$k]){
+              $flag_max_changed = 0;
+            }
+            else {
+              $flag_max_changed = 1;
+              break;
+            }
+          }
+        }
+        if($flag_max_changed) {
+          $finalClusters[$max][count($finalClusters[$max])] = $unclustered[$i];
+        }
+        else {
+          $randCluster = rand(0,$numberOfClusters-1);
+          $finalClusters[$randCluster][count($finalClusters[$randCluster])] = $unclustered[$i];
+        }
+      }
+      return $finalClusters;
+    }
+
+    //Login or logout url will be needed depending on current user state.
+    if ($user) {
+      $logoutUrl = $facebook->getLogoutUrl();
+    } else {
+      //$params array will contain all the permissions that the user has to allow in order to progress with clustering part of this application
+      $params = array(
+        'scope' => 'user_birthday,friends_birthday,user_education_history,friends_education_history,user_hometown,friends_hometown,user_interests,friends_interests,user_location,friends_location'
+        );
+      $loginUrl = $facebook->getLoginUrl($params);
+    }
+?>
+
+<!DOCTYPE html>
+<!--[if lt IE 7]>      <html class="no-js lt-ie9 lt-ie8 lt-ie7"> <![endif]-->
+<!--[if IE 7]>         <html class="no-js lt-ie9 lt-ie8"> <![endif]-->
+<!--[if IE 8]>         <html class="no-js lt-ie9"> <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]-->
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+        <title></title>
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width">
+
+        <link rel="stylesheet" href="css/bootstrap.min.css">
+        <style>
+            body {
+                padding-top: 60px;
+                padding-bottom: 40px;
+            }
+        </style>
+        <link rel="stylesheet" href="css/bootstrap-responsive.min.css">
+        <link rel="stylesheet" href="css/main.css">
+
+        <!--[if lt IE 9]>
+            <script src="js/vendor/html5-3.6-respond-1.1.0.min.js"></script>
+        <![endif]-->
+    </head>
+    <body>
+        <!--[if lt IE 7]>
+            <p class="chromeframe">You are using an outdated browser. <a href="http://browsehappy.com/">Upgrade your browser today</a> or <a href="http://www.google.com/chromeframe/?redirect=true">install Google Chrome Frame</a> to better experience this site.</p>
+        <![endif]-->
+
+        <!-- This code is taken from http://twitter.github.com/bootstrap/examples/hero.html -->
+
+        <div class="navbar navbar-inverse navbar-fixed-top">
+            <div class="navbar-inner">
+                <div class="container">
+                    <a class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse">
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                    </a>
+                    <a class="brand" href="#">Facebook friend cluster</a>
+                    <div class="nav-collapse collapse">
+                        <ul class="nav">
+                            <li id="loginLink" class="active"><a href="#">Login</a></li>
+                            <li id="similarLink"><a href="#similar">Similar</a></li>
+                            <li id="clusterLink"><a href="#cluster">Cluster</a></li>
+                            <li id="aboutLink"><a href="#about">About</a></li>
+                        </ul>
+                    </div><!--/.nav-collapse -->
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+
+            <!-- Main hero unit for a primary marketing message or call to action -->
+            <div class="hero-unit">
+                <h1>Facebook Friends Cluster</h1>
+                <p>Please click the button login in the login tab, login into facebook and then authorize the app. Afterwards you will be redirected to this page. Then browse through different tabs<br />1.Similar - To find top 10 similar users to you<br />2.Cluster - To cluster your facebook friends<br />3.About - To find out how this app was implemented <br /><b>Please note each time you enter the app or refresh the page, the clusters formed will be different because the initial nodes are selected in random</b></p>
+                <!--p><a class="btn btn-primary btn-large">Learn more &raquo;</a></p-->
+            </div>
+
+            <div id="login">
+                <?php if ($user): ?>
+                  <a class="btn btn-primary btn-large" href="<?php echo $logoutUrl; ?>">Logout</a>
+                <?php else: ?>
+                  <div>
+                    <a class="btn btn-primary btn-large" href="<?php echo $loginUrl; ?>">Login with Facebook</a>
+                    <br />
+                  </div>
+                <?php endif ?>
+            </div>
+
+            <div id="similar" class="doNotDisplay">
+                <?php if ($user): ?>
+                  <h1>The top 10 similar facebook friends to you are</h1>
+                  <ul class="nonFloating">
+                  <?php foreach($similar_users as $value): ?>
+                  <li class="floating">
+                    <p class="centerAlign"><?php print_r($value[name]) ?></p>
+                    <a href="https://facebook.com/<?php echo $value[id] ?>" target="_blank"><img  src="https://graph.facebook.com/<?php echo $value[id] ?>/picture?type=square" alt="<?php echo $value[name]; ?>"></a>
+                   </li> 
+                  <?php endforeach; ?>
+                <?php else: ?>
+                   Please follow the instructions given in the section above.  
+                <?php endif ?>
+            </div>
+
+            <div id="cluster" class="doNotDisplay">
+                <?php if ($user): ?>
+                    <h1> Your friends have been divided into the following clusters</h1>
+                    <?php for($i=0;$i < count($clusters); $i++): ?>
+                        <h2> Cluster <?php echo $i+1 ?> has <?php echo count($clusters[$i]) ?> members</h2>
+                        <ul class="nonFloating">
+                          <?php for($j=0;$j < count($clusters[$i]);$j++): ?>
+                            <li class="floating">
+                              <p class="centerAlign"><?php print_r($clusters[$i][$j][name]) ?></p>
+                              <a href="https://facebook.com/<?php echo $clusters[$i][$j][id] ?>" target="_blank"><img  src="https://graph.facebook.com/<?php echo $clusters[$i][$j][id] ?>/picture?type=square" alt="<?php echo $value[name]; ?>"></a>
+                            </li>
+                          <?php endfor; ?>
+                        </ul>
+                    <?php endfor; ?>
+                <?php else: ?>
+                  Please follow the instructions given in the section above.
+                <?php endif ?>
+            </div>
+
+            <div id="about" class="doNotDisplay">
+                <div class="outer">
+                  <div class="topicHeader">
+                    <h1>What is it?</h1>
+                  </div>
+                  <div class="topicDescription">
+                    <h3>This is an application which uses your facebook data to intelligently provide you 10 most similar users to you and cluster your friends based on similarity of attributes </h3>
+                  </div>
+                </div>
+                <div class="outer">
+                  <div class="topicHeader">
+                    <h1>How it works?</h1>
+                  </div>
+                  <div class="topicDescription">
+                    <h3>It uses secure OAuth authentication of facebook for login. I am using facebook apis to fetch the data from facebook. I am currently using 5 attributes of each user to calculate similarity, the attributes are birthday, location, hometown, education, interests. Similarity is calculated by taking into account number of matching items to the total number of items available.</h3>
+                  </div>
+                </div>
+                <div class="outer">
+                  <div class="topicHeader">
+                    <h1>Who am I?</h1>
+                  </div>
+                  <div class="topicDescription">
+                    <h3>Name : Vivek P</h3>
+                    <h3>USN : 1PI09IS119</h3>
+                  </div>
+                </div>
+            </div>
+            <hr>
+
+            <footer>
+                <p>&copy; Vivek 2012</p>
+            </footer>
+
+        </div> <!-- /container -->
+
+        <script src="//ajax.googleapis.com/ajax/libs/jquery/1.8.2/jquery.min.js"></script>
+        <script>window.jQuery || document.write('<script src="js/vendor/jquery-1.8.2.min.js"><\/script>')</script>
+
+        <script src="js/vendor/bootstrap.min.js"></script>
+
+        <script src="js/main.js"></script>
+
+        <script>
+            var _gaq=[['_setAccount','UA-XXXXX-X'],['_trackPageview']];
+            (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+            g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+            s.parentNode.insertBefore(g,s)}(document,'script'));
+        </script>
+    </body>
+</html>
