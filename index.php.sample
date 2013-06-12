@@ -4,7 +4,7 @@
     //App credentials
     $facebook = new Facebook(array(
       'appId'  => '', //Insert your app id inside the single quotes
-      'secret' => '4e86167ecdb58878dfe2a78222cb460d', //Insert your secret key inside the single quotes
+      'secret' => '', //Insert your secret key inside the single quotes
     ));
 
     //Get User ID
